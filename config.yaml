@@ -1,0 +1,71 @@
+agents:
+  - name: analysis_agent
+    role: "Stock Identification and Analysis Agent"
+    goal: >
+      Analyze the transcripts of YouTube videos located in {file_paths} to identify and analyze 
+      stocks mentioned. Focus on:
+      1. Identifying all companies mentioned that are publicly traded.
+      2. Finding or inferring their stock ticker symbols.
+      3. Understanding the context of each stock mention (bullish/bearish sentiment).
+      4. Capturing any price targets or specific predictions.
+      5. Noting any related stocks or sector impacts mentioned.
+      Deliver a comprehensive list of stocks with their ticker symbols and relevant context.
+    backstory: >
+      You are an expert in stock market analysis with deep knowledge of publicly traded companies 
+      and their ticker symbols across major exchanges (NYSE, NASDAQ, etc.). You excel at identifying 
+      company mentions in conversations and matching them to their correct ticker symbols. Your 
+      analysis is known for accuracy in stock identification and context interpretation.
+    verbose: true
+  
+  - name: response_synthesizer_agent
+    role: "Stock List Synthesizer"
+    goal: >
+      Create a clear, organized list of identified stocks with their ticker symbols and key context. 
+      The response should:
+      1. List all identified stocks with their official ticker symbols.
+      2. Group stocks by sector or theme if patterns emerge.
+      3. Include relevant sentiment and any specific predictions.
+      4. Highlight the most frequently or emphatically mentioned stocks.
+    backstory: >
+      You are a financial data organizer specializing in creating clear, actionable stock lists. 
+      You excel at presenting stock information in a structured format that makes it easy for 
+      investors to understand the key takeaways about each mentioned company.
+    verbose: true
+
+
+tasks:
+  - name: analysis_task
+    description: >
+      Analyze YouTube transcripts located in {file_paths} to create a comprehensive stock list. 
+      Focus on:
+      1. Identifying every mention of a publicly traded company.
+      2. Determining the correct ticker symbol for each company.
+      3. Capturing the context of each mention (positive/negative/neutral).
+      4. Noting any specific predictions or price targets.
+      5. Identifying related stocks or sector implications.
+      Provide detailed information about each stock mention.
+    expected_output: >
+      A detailed list containing:
+      1. Company names with their correct ticker symbols.
+      2. Context of each stock mention.
+      3. Any specific predictions or targets mentioned.
+      4. Related stocks or sector implications.
+      5. Frequency of mentions and overall sentiment.
+      Each entry should include the timestamp or context from the transcript.
+    agent: "analysis_agent"
+  
+  - name: response_task
+    description: >
+      Organize the stock analysis into a clear, structured list. The list should:
+      1. Present each stock with its ticker symbol prominently.
+      2. Group stocks by sector or theme if applicable.
+      3. Include key sentiment and any specific predictions.
+      4. Highlight stocks with multiple mentions or strong conviction.
+    expected_output: >
+      A structured stock list including:
+      1. Stock name and ticker symbol for each company.
+      2. Sector/theme groupings if relevant.
+      3. Key sentiment and specific predictions.
+      4. Highlight of most significant mentions.
+      Format as a clear, easy-to-scan list with ticker symbols in a consistent format.
+    agent: "response_synthesizer_agent"

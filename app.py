@@ -89,7 +89,7 @@ crewai_image = load_image_as_base64("assets/crewai.png")
 brightdata_image = load_image_as_base64("assets/brightdata.png")
 
 st.markdown("""
-    # YouTube Trend Analysis powered by <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;"> & <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;">
+    # YouTube Stock Market Research & Analytics powered by <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;"> & <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;">
 """.format(crewai_image, brightdata_image), unsafe_allow_html=True)
 
 
@@ -146,22 +146,15 @@ def start_analysis():
             channel_snapshot_id = trigger_scraping_channels(
                 bright_data_api_key, 
                 st.session_state.youtube_channels, 
-                10, 
+                50,  # Increased to BrightData's maximum limit of 50 videos
                 st.session_state.start_date, 
                 st.session_state.end_date, 
                 "Latest", 
                 ""
             )
             
-            if not channel_snapshot_id or (isinstance(channel_snapshot_id, dict) and channel_snapshot_id.get('status') == 'failed'):
-                error_msg = channel_snapshot_id.get('error', 'Unknown error') if isinstance(channel_snapshot_id, dict) else "Failed to get video list"
-                if 'limit' in error_msg.lower():
-                    status_container.error(
-                        "Video limit exceeded. BrightData allows maximum 50 videos per request. "
-                        "Please use a smaller date range or fewer channels."
-                    )
-                else:
-                    status_container.error(f"Failed to get video list: {error_msg}")
+            if not channel_snapshot_id:
+                status_container.error("Failed to get video list. Please check your Brightdata API key and internet connection.")
                 return
                 
             status = get_progress(bright_data_api_key, channel_snapshot_id['snapshot_id'])
@@ -246,11 +239,55 @@ def start_analysis():
                         st.session_state.response = st.session_state.crew.kickoff(
                             inputs={"file_paths": ", ".join(st.session_state.all_files)})
                     return
-                else:
-                    status_container.info(f"Found {len(missing_videos)} new videos. Downloading their transcripts...")
+                
+            # Process transcripts for all videos (either missing ones or all if skip_transcripts is False)
+            videos_to_process = missing_videos if st.session_state.skip_transcripts else current_video_ids
+            status_container.info(f"Processing transcripts for {len(videos_to_process)} videos...")
             
-            # Continue with the rest of the function to display videos and process transcripts
-            # ... rest of the existing display and transcript processing code ...
+            processed_files = []
+            for video_data in videos_data:
+                video_id = get_video_id_from_data(video_data)
+                if not video_id or (st.session_state.skip_transcripts and video_id not in videos_to_process):
+                    continue
+                
+                try:
+                    # Extract relevant information
+                    title = video_data.get('title', 'No Title')
+                    description = video_data.get('description', 'No Description')
+                    transcript = video_data.get('transcript', '')
+                    
+                    # Create transcript file
+                    transcript_path = os.path.join("transcripts", f"{video_id}.txt")
+                    with open(transcript_path, 'w', encoding='utf-8') as f:
+                        f.write(f"Title: {title}\\n\\n")
+                        f.write(f"Description: {description}\\n\\n")
+                        f.write("Transcript:\\n")
+                        f.write(transcript if transcript else "No transcript available")
+                    
+                    processed_files.append(transcript_path)
+                    status_container.success(f"Processed video: {title}")
+                except Exception as e:
+                    status_container.warning(f"Failed to process video {video_id}: {str(e)}")
+            
+            if not processed_files:
+                status_container.error("No transcripts could be processed. Please try again.")
+                return
+            
+            # Combine existing and new transcripts if using skip_transcripts
+            if st.session_state.skip_transcripts:
+                st.session_state.all_files = [existing_transcripts[vid_id] 
+                                            for vid_id in current_video_ids 
+                                            if vid_id in existing_transcripts]
+                st.session_state.all_files.extend(processed_files)
+            else:
+                st.session_state.all_files = processed_files
+            
+            status_container.success(f"Successfully processed {len(processed_files)} transcripts.")
+            
+            with st.spinner('The agent is analyzing the videos... This may take a moment.'):
+                st.session_state.crew = create_agents_and_tasks()
+                st.session_state.response = st.session_state.crew.kickoff(
+                    inputs={"file_paths": ", ".join(st.session_state.all_files)})
 
         except Exception as e:
             status_container.error(f"An error occurred: {str(e)}")

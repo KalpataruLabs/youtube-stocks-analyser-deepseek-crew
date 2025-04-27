@@ -7,6 +7,8 @@ import gc
 import base64
 import time
 import yaml
+import subprocess
+import json
 
 from tqdm import tqdm
 from brightdata_scrapper import *
@@ -19,10 +21,47 @@ docs_tool = FileReadTool()
 bright_data_api_key = os.getenv("BRIGHT_DATA_API_KEY")
 
 
-@st.cache_resource
-def load_llm():
+def get_ollama_models():
+    """Get list of available Ollama models"""
+    try:
+        # Try without the --json flag
+        result = subprocess.run(['ollama', 'list'], 
+                               stdout=subprocess.PIPE, 
+                               stderr=subprocess.PIPE, 
+                               text=True)
+        
+        if result.returncode != 0:
+            raise Exception(f"ollama list failed: {result.stderr}")
+            
+        # Parse the output which looks like:
+        # NAME            ID              SIZE    MODIFIED
+        # llama2:latest   ...             ...     ...
+        models = []
+        lines = result.stdout.strip().split('\n')
+        if len(lines) > 1:  # Skip header row
+            for line in lines[1:]:
+                parts = line.split()
+                if parts:
+                    model_name = parts[0]
+                    models.append(f"ollama/{model_name}")
+                    
+        return models if models else ["ollama/deepseek-r1:7b"]  # Default if no models found
+    
+    except Exception as e:
+        # Fallback to a default set of common models
+        st.warning(f"Failed to fetch ollama models: {str(e)}")
+        return [
+            "ollama/deepseek-r1:7b",
+            "ollama/llama2:7b",
+            "ollama/mistral:7b",
+            "ollama/phi3:3b"
+        ]
+
+
+@st.cache_resource(hash_funcs={str: lambda x: x})
+def load_llm(model_name):
     llm = LLM(
-        model="ollama/deepseek-r1:7b",
+        model=model_name,
         base_url="http://localhost:11434"
     )
     return llm
@@ -44,7 +83,7 @@ def create_agents_and_tasks():
         backstory=config["agents"][0]["backstory"],
         verbose=True,
         tools=[docs_tool],
-        llm=load_llm()
+        llm=load_llm(st.session_state.llm_model)
     )
 
     response_synthesizer_agent = Agent(
@@ -52,7 +91,7 @@ def create_agents_and_tasks():
         goal=config["agents"][1]["goal"],
         backstory=config["agents"][1]["backstory"],
         verbose=True,
-        llm=load_llm()
+        llm=load_llm(st.session_state.llm_model)
     )
 
     analysis_task = Task(
@@ -89,10 +128,11 @@ crewai_image = load_image_as_base64("assets/crewai.png")
 brightdata_image = load_image_as_base64("assets/brightdata.png")
 
 st.markdown("""
-    # YouTube Stock Market Research & Analytics powered by <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;"> & <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;">
+    # YouTube Trend Analysis powered by <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;"> & <img src="data:image/png;base64,{}" width="120" style="vertical-align: -3px;">
 """.format(crewai_image, brightdata_image), unsafe_allow_html=True)
 
 
+# Initialize session state variables
 if "messages" not in st.session_state:
     st.session_state.messages = []  # Chat history
 
@@ -105,6 +145,14 @@ if "crew" not in st.session_state:
 # Initialize skip_transcripts in session state if not present
 if "skip_transcripts" not in st.session_state:
     st.session_state.skip_transcripts = True
+
+# Initialize youtube_channels in session state if not present
+if "youtube_channels" not in st.session_state:
+    st.session_state.youtube_channels = [""]  # Start with one empty field
+
+# Initialize LLM model selection in session state if it doesn't exist
+if "llm_model" not in st.session_state:
+    st.session_state.llm_model = "ollama/deepseek-r1:7b"
 
 def reset_chat():
     st.session_state.messages = []
@@ -298,10 +346,6 @@ def start_analysis():
 with st.sidebar:
     st.header("YouTube Channels")
 
-    # Initialize the channels list in session state if it doesn't exist
-    if "youtube_channels" not in st.session_state:
-        st.session_state.youtube_channels = [""]  # Start with one empty field
-
     # Function to add new channel field
     def add_channel_field():
         st.session_state.youtube_channels.append("")
@@ -342,6 +386,23 @@ with st.sidebar:
 
     st.divider()
     
+    # Add LLM model selection
+    st.subheader("LLM Model")
+    previous_model = st.session_state.llm_model
+    st.session_state.llm_model = st.selectbox(
+        "Select Model",
+        options=get_ollama_models(),
+        index=0,
+        help="Choose which LLM model to use for analysis"
+    )
+    
+    # Clear cache if model changes
+    if previous_model != st.session_state.llm_model and "crew" in st.session_state:
+        st.session_state.pop("crew", None)
+        st.session_state.pop("response", None)
+    
+    st.divider()
+    
     # Add option to skip transcript download with session state
     st.session_state.skip_transcripts = st.checkbox(
         "Skip transcript download if available", 
@@ -357,7 +418,7 @@ with st.sidebar:
 # ===========================
 
 # Main content area
-if st.session_state.response:
+if "response" in st.session_state and st.session_state.response:
     with st.spinner('Generating content... This may take a moment.'):
         try:
             result = st.session_state.response
@@ -373,6 +434,8 @@ if st.session_state.response:
             )
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
+else:
+    st.info("Click 'Start Analysis' to begin analyzing YouTube trends.")
 
 # Footer
 st.markdown("---")
